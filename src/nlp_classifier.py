@@ -1,25 +1,14 @@
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 
-texts = [
-    "Energy demand increased",
-    "Power usage decreased",
-    "Electricity demand is high",
-    "Energy consumption dropped",
-    "Electricity usage is stable"
-]
-
-labels = ["increase", "decrease", "increase", "decrease", "neutral"]
+# Simplified training for the prototype
+texts = ["demand increased", "usage decreased", "stable power"]
+labels = ["increase", "decrease", "neutral"]
 
 vectorizer = TfidfVectorizer()
-X = vectorizer.fit_transform(texts)
+X_nlp = vectorizer.fit_transform(texts)
+clf = LogisticRegression().fit(X_nlp, labels)
 
-model = LogisticRegression()
-model.fit(X, labels)
-
-# test prediction
-sample = ["power demand increased significantly"]
-prediction = model.predict(vectorizer.transform(sample))
-
-print("Prediction:", prediction[0])
-print("NLP prototype ready")
+def get_nlp_multiplier(alert_text):
+    pred = clf.predict(vectorizer.transform([alert_text]))[0]
+    return {"increase": 1.5, "decrease": 0.7, "neutral": 1.0}.get(pred, 1.0)

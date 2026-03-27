@@ -1,104 +1,68 @@
-import pandas as pd
-import numpy as np
 import torch
 import torch.nn as nn
+import pandas as pd
+import numpy as np
+import os
 from torch.utils.data import DataLoader, TensorDataset
-from sklearn.metrics import mean_absolute_error, mean_absolute_percentage_error
-from models.tcn_model import SimpleTCN
+from models.tcn_model import DilatedTCN
 
-# -------------------------
-# Config
-# -------------------------
-DATA_PATH = "data/processed_energy_hourly.csv"
-TARGET_COL = "Global_active_power"
-SEQ_LEN = 24
-BATCH_SIZE = 32
-EPOCHS = 5
-LR = 0.001
+# 1. Load Data
+# Get the folder where train.py is located (src)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# -------------------------
-# Load data
-# -------------------------
-df = pd.read_csv(DATA_PATH)
-series = df[TARGET_COL].values.astype(np.float32)
+# Go up one level to find the 'data' folder
+data_path = os.path.join(BASE_DIR, "..", "data", "processed_energy_hourly.csv")
 
-# normalize
-mean = series.mean()
-std = series.std()
-series = (series - mean) / std
+# Load the file
+df = pd.read_csv(data_path)
+series = df["Global_active_power"].values.astype(np.float32)
 
-# -------------------------
-# Create sequences
-# -------------------------
-X, y = [], []
-for i in range(len(series) - SEQ_LEN):
-    X.append(series[i:i+SEQ_LEN])
-    y.append(series[i+SEQ_LEN])
+# Normalization
+mean, std = series.mean(), series.std()
+series_norm = (series - mean) / std
 
-X = np.array(X)
-y = np.array(y)
+# 2. Create Sequences (24h window)
+def create_windows(data, window=24):
+    x, y = [], []
+    for i in range(len(data) - window):
+        x.append(data[i:i+window])
+        y.append(data[i+window])
+    return np.array(x), np.array(y)
 
-# split
+X, y = create_windows(series_norm)
+
+# 3. Splits (70/15/15)
 n = len(X)
-train_end = int(n * 0.7)
-val_end = int(n * 0.85)
+train_idx, val_idx = int(n*0.7), int(n*0.85)
+X_train, y_train = torch.tensor(X[:train_idx]).unsqueeze(1), torch.tensor(y[:train_idx])
+X_val, y_val = torch.tensor(X[train_idx:val_idx]).unsqueeze(1), torch.tensor(y[train_idx:val_idx])
 
-X_train, y_train = X[:train_end], y[:train_end]
-X_val, y_val = X[train_end:val_end], y[train_end:val_end]
-X_test, y_test = X[val_end:], y[val_end:]
+train_loader = DataLoader(TensorDataset(X_train, y_train), batch_size=64, shuffle=True)
+val_loader = DataLoader(TensorDataset(X_val, y_val), batch_size=64)
 
-# reshape for Conv1D: (batch, channels, seq_len)
-X_train = torch.tensor(X_train).unsqueeze(1)
-y_train = torch.tensor(y_train).unsqueeze(1)
-
-X_val = torch.tensor(X_val).unsqueeze(1)
-y_val = torch.tensor(y_val).unsqueeze(1)
-
-X_test = torch.tensor(X_test).unsqueeze(1)
-y_test = torch.tensor(y_test).unsqueeze(1)
-
-train_loader = DataLoader(TensorDataset(X_train, y_train), batch_size=BATCH_SIZE, shuffle=True)
-
-# -------------------------
-# Model
-# -------------------------
-model = SimpleTCN()
+# 4. Train
+model = DilatedTCN()
 criterion = nn.MSELoss()
-optimizer = torch.optim.Adam(model.parameters(), lr=LR)
+optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+best_val = float('inf')
 
-# -------------------------
-# Training
-# -------------------------
-print("Training TCN/CNN model...")
-for epoch in range(EPOCHS):
+for epoch in range(15):
     model.train()
-    total_loss = 0
-
-    for xb, yb in train_loader:
+    for bx, by in train_loader:
         optimizer.zero_grad()
-        preds = model(xb)
-        loss = criterion(preds, yb)
+        loss = criterion(model(bx).squeeze(), by)
         loss.backward()
         optimizer.step()
-        total_loss += loss.item()
-
-    avg_loss = total_loss / len(train_loader)
-    print(f"Epoch {epoch+1}/{EPOCHS}, Loss: {avg_loss:.4f}")
-
-# -------------------------
-# Evaluation
-# -------------------------
-model.eval()
-with torch.no_grad():
-    preds = model(X_test).squeeze().numpy()
-    actual = y_test.squeeze().numpy()
-
-# denormalize
-preds = preds * std + mean
-actual = actual * std + mean
-
-mae = mean_absolute_error(actual, preds)
-mape = mean_absolute_percentage_error(actual, preds)
-
-print(f"Test MAE: {mae:.4f}")
-print(f"Test MAPE: {mape:.4f}")
+    
+    model.eval()
+    val_l = 0
+    with torch.no_grad():
+        for bx, by in val_loader:
+            val_l += criterion(model(bx).squeeze(), by).item()
+    
+    avg_val = val_l / len(val_loader)
+    if avg_val < best_val:
+        best_val = avg_val
+        # BASE_DIR is '.../src', so this points to '.../src/models/energy_tcn.pth'
+        torch.save(model.state_dict(), os.path.join(BASE_DIR, "models", "energy_tcn.pth"))
+        print(f"Epoch {epoch} - Model Saved (Val Loss: {avg_val:.4f})")
