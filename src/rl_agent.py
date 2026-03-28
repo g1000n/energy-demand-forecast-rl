@@ -29,16 +29,21 @@ class QLearningAgent:
             return np.random.randint(self.num_actions)
         return int(np.argmax(self.q_table[state]))
 
-    def update(self, state: tuple[int, int, int], action: int, reward: float, next_state: tuple[int, int, int]) -> None:
-        alpha, gamma = 0.1, 0.95
+    def update(
+        self,
+        state: tuple[int, int, int],
+        action: int,
+        reward: float,
+        next_state: tuple[int, int, int],
+        alpha: float,
+        gamma: float,
+    ) -> None:
         old_q = self.q_table[state][action]
         best_next = np.max(self.q_table[next_state])
         self.q_table[state][action] = old_q + alpha * (reward + gamma * best_next - old_q)
 
 
 def _prepare_forecast_df(processed_csv_path, forecast_csv_path):
-    import pandas as pd
-
     actual = pd.read_csv(processed_csv_path)
     preds = pd.read_csv(forecast_csv_path)
 
@@ -64,27 +69,32 @@ def _prepare_forecast_df(processed_csv_path, forecast_csv_path):
 
 def _run_single_seed(forecast_df: pd.DataFrame, seed: int, cfg: RLConfig):
     set_seed(seed)
+
     appliance_templates = [
         ApplianceRequest("dishwasher", power_kw=1.0, duration_hours=1, earliest_start_hour=19, latest_finish_hour=23),
         ApplianceRequest("washing_machine", power_kw=1.2, duration_hours=1, earliest_start_hour=18, latest_finish_hour=22),
         ApplianceRequest("water_heater", power_kw=0.8, duration_hours=1, earliest_start_hour=6, latest_finish_hour=9),
     ]
+
     env = EnergySchedulingEnv(forecast_df, appliance_templates)
     agent = QLearningAgent()
 
     episode_rewards = []
     success_rates = []
 
+    # Training loop
     for _ in range(cfg.episodes):
         state = env.reset()
         done = False
         total_reward = 0.0
+
         while not done:
             action = agent.act(state, cfg.epsilon)
             next_state, reward, done, _ = env.step(action)
-            agent.update(state, action, reward, next_state)
+            agent.update(state, action, reward, next_state, cfg.alpha, cfg.gamma)
             state = next_state
             total_reward += reward
+
         episode_rewards.append(total_reward)
         denom = max(env.successes + env.failures, 1)
         success_rates.append(env.successes / denom)
@@ -95,18 +105,18 @@ def _run_single_seed(forecast_df: pd.DataFrame, seed: int, cfg: RLConfig):
     done = False
     total_reward = 0.0
     decisions = []
+
     while not done:
         action = int(np.argmax(agent.q_table[state]))
         next_state, reward, done, info = env_eval.step(action)
         total_reward += reward
-        info["decision"] = "run_now" if action == 0 else "delay"
         decisions.append(info)
         state = next_state
 
     decisions_df = pd.DataFrame(decisions)
     baseline_cost = float(decisions_df["baseline_cost"].sum())
     scheduled_cost = float(decisions_df["scheduled_cost"].sum())
-    rl_success_rate = float(max(env_eval.successes / max(env_eval.successes + env_eval.failures, 1), 0.0))
+    rl_success_rate = float(env_eval.successes / max(env_eval.successes + env_eval.failures, 1))
 
     return {
         "seed": seed,
@@ -126,8 +136,8 @@ def run_rl_experiment(processed_csv_path: str, forecast_csv_path: str) -> dict[s
     results_dir = root / "results"
     logs_dir = root / "logs"
     cfg = RLConfig()
-    forecast_df = _prepare_forecast_df(processed_csv_path, forecast_csv_path)
 
+    forecast_df = _prepare_forecast_df(processed_csv_path, forecast_csv_path)
     runs = [_run_single_seed(forecast_df, seed, cfg) for seed in cfg.seeds]
 
     plt.figure(figsize=(8, 4))
@@ -165,6 +175,7 @@ def run_rl_experiment(processed_csv_path: str, forecast_csv_path: str) -> dict[s
     best_run = max(runs, key=lambda x: x["final_reward"])
     best_run["decisions_df"].to_csv(results_dir / "rl_decisions_sample.csv", index=False)
     save_json(logs_dir / "rl_summary.json", summary)
+
     return summary
 
 

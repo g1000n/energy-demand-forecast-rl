@@ -18,30 +18,22 @@ This project is implemented as an **offline simulation prototype**, not a real-t
 
 ## Course Requirement Coverage
 
-This repository was designed to satisfy the major requirements of the 6INTELSY final project:
+This repository was designed to satisfy the major requirements of the 6INTELSY final project.
 
-### Minimum Technical Expectations
+### Option 7 Coverage
 
-- At least one model built from scratch
-- One core deep learning model
-- One CNN component
-- One NLP component
-- One RL component
-- One complete ML pipeline from data preparation to evaluation and analysis
+- **Task:** Forecast demand and schedule loads to reduce proxy costs
+- **MVP:** LSTM/TCN forecast + tabular baseline + simple RL
+- **Metrics:** MAE/MAPE for forecasting; RL reward vs baseline policy
+- **Ethics focus:** equity, user autonomy, limitations of automated scheduling
 
-### Evaluation Coverage
+### Technical Requirement Coverage
 
-- **Time-series:** MAE, MAPE
-- **NLP:** Accuracy, Macro-F1, Confusion Matrix
-- **RL:** learning curves, success rate, reward vs baseline policy, variance across seeds
-
-### Reproducibility
-
-- `requirements.txt`
-- `run.py` for one-command pipeline execution on Windows
-- `run.sh` for shell-based execution
-- organized project structure
-- saved outputs in `results/` and `logs/`
+- **Core deep learning model:** LSTM
+- **CNN requirement:** TCN
+- **NLP requirement:** auxiliary demand-text classification
+- **RL requirement:** Q-learning load scheduling environment
+- **Reproducibility:** `run.py`, `run.sh`, `requirements.txt`, organized outputs
 
 ---
 
@@ -49,10 +41,10 @@ This repository was designed to satisfy the major requirements of the 6INTELSY f
 
 The system aims to answer two connected questions:
 
-1. **Forecasting:**  
+1. **Forecasting**  
    Given historical household electricity usage, how much demand is expected in the next hour?
 
-2. **Scheduling:**  
+2. **Scheduling**  
    Given that forecast, should a flexible appliance run now or be delayed to a later hour to reduce proxy electricity cost?
 
 ---
@@ -63,7 +55,7 @@ The primary dataset is the **UCI Individual Household Electric Power Consumption
 
 It was chosen because:
 
-- it is household-level data, which fits the project task
+- it is household-level data, which matches the project task
 - it contains minute-level electricity measurements over almost 4 years
 - it includes multiple electrical variables and sub-metering values
 - it supports both forecasting and realistic household load-scheduling simulation
@@ -102,15 +94,13 @@ A **chronological temporal split** is used to avoid data leakage:
 - **15% validation**
 - **15% testing**
 
-This follows time-series best practice and keeps future data from leaking into the training stage.
-
 ---
 
 ## System Components
 
 ### 1. Forecasting Models
 
-The forecasting stage predicts the next-hour household electricity demand.
+The forecasting stage predicts next-hour household electricity demand.
 
 Models included:
 
@@ -122,13 +112,7 @@ Models included:
 
 The NLP component is a lightweight text classifier that assigns simple demand-related labels to generated demand descriptions.
 
-Its purpose is **auxiliary**, not central. It demonstrates the required NLP component and shows how textual demand context could be incorporated into a broader intelligent energy system.
-
-Example labels:
-
-- low demand
-- medium demand
-- high demand
+Its purpose is **auxiliary**, not central. It demonstrates the required NLP component and shows how textual demand context could support a broader intelligent energy system.
 
 ### 3. RL Scheduling Module
 
@@ -162,6 +146,7 @@ A Streamlit dashboard is included to visualize:
 - RL learning curves
 - RL scheduling decisions
 - baseline vs scheduled cost
+- simulation walkthrough and what-if interaction
 
 ---
 
@@ -180,8 +165,6 @@ For each simulated hour:
 5. the system computes reward based on proxy cost reduction
 6. results are saved for analysis
 
-This means the system behaves like a time-based controller, but runs quickly as an offline experiment.
-
 ---
 
 ## Main Outputs
@@ -195,6 +178,12 @@ After the pipeline is executed, the project generates:
 - `forecast_actual_vs_predicted.png`
 - `training_curve_lstm.png`
 - `training_curve_tcn.png`
+
+### Evaluation and Analysis
+
+- `ablation_results.csv`
+- `forecast_slice_analysis.csv`
+- `forecast_worst_cases.csv`
 
 ### NLP
 
@@ -229,12 +218,13 @@ After the pipeline is executed, the project generates:
 ### Ablations
 
 - LSTM vs TCN
-- Linear Regression with time features vs reduced/simple baseline setup
+- baseline comparison against deep learning models
 
 ### Error Analysis
 
 - worst-case forecast examples
-- slice analysis through evaluation outputs
+- time-of-day slices
+- weekday vs weekend slices
 
 ---
 

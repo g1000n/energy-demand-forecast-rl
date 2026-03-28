@@ -1,9 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
-
-import numpy as np
 import pandas as pd
 
 
@@ -18,86 +15,101 @@ class ApplianceRequest:
 
 class EnergySchedulingEnv:
     def __init__(self, forecast_df: pd.DataFrame, appliance_templates: list[ApplianceRequest]):
-        self.forecast_df = forecast_df.reset_index(drop=True).copy()
+        self.df = forecast_df.copy().reset_index(drop=True)
         self.appliance_templates = appliance_templates
-        self.idx = 0
-        self.pending: ApplianceRequest | None = None
-        self.pending_wait = 0
-        self.current_episode_reward = 0.0
+        self.index = 0
         self.successes = 0
         self.failures = 0
 
-    def reset(self) -> tuple[int, int, int]:
-        self.idx = 0
-        self.pending = None
-        self.pending_wait = 0
-        self.current_episode_reward = 0.0
+    def _get_active_appliance(self, hour: int):
+        for appliance in self.appliance_templates:
+            if appliance.earliest_start_hour <= hour <= appliance.latest_finish_hour:
+                return appliance
+        return None
+
+    def _bucket_demand(self, demand: float) -> int:
+        if demand < 1.0:
+            return 0
+        elif demand < 2.0:
+            return 1
+        elif demand < 3.0:
+            return 2
+        return 3
+
+    def _bucket_hour(self, hour: int) -> int:
+        return min(hour // 3, 7)
+
+    def _get_state(self):
+        row = self.df.iloc[self.index]
+        predicted = float(row["predicted_demand_kw"])
+        hour = int(row["hour"]) if "hour" in row else pd.to_datetime(row["datetime"]).hour
+        appliance = self._get_active_appliance(hour)
+        has_appliance = 1 if appliance is not None else 0
+        return (self._bucket_demand(predicted), self._bucket_hour(hour), has_appliance)
+
+    def reset(self):
+        self.index = 0
         self.successes = 0
         self.failures = 0
         return self._get_state()
 
-    def _spawn_request(self, hour: int) -> ApplianceRequest | None:
-        for template in self.appliance_templates:
-            if hour == template.earliest_start_hour:
-                return template
-        return None
+    def step(self, action: int):
+        row = self.df.iloc[self.index]
 
-    def _demand_bucket(self, value: float) -> int:
-        bins = [0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0]
-        return int(np.digitize([value], bins)[0])
-
-    def _get_state(self) -> tuple[int, int, int]:
-        row = self.forecast_df.iloc[self.idx]
-        hour_bucket = int(row["hour"] // 6)
-        demand_bucket = self._demand_bucket(float(row["predicted_demand_kw"]))
-        pending_flag = 0 if self.pending is None else 1
-        return hour_bucket, demand_bucket, pending_flag
-
-    def step(self, action: int) -> tuple[tuple[int, int, int], float, bool, dict[str, Any]]:
-        row = self.forecast_df.iloc[self.idx]
-        hour = int(row["hour"])
+        dt = pd.to_datetime(row["datetime"]) if "datetime" in row else None
         predicted = float(row["predicted_demand_kw"])
-        if self.pending is None:
-            self.pending = self._spawn_request(hour)
-            self.pending_wait = 0
+        actual = float(row["actual_demand_kw"])
+        hour = int(row["hour"]) if "hour" in row else (dt.hour if dt is not None else 0)
 
-        price = 1.0 if predicted < 1.0 else 1.5 if predicted < 2.0 else 2.0
+        appliance = self._get_active_appliance(hour)
+
+        reward = 0.0
         baseline_cost = 0.0
         scheduled_cost = 0.0
-        info: dict[str, Any] = {
-            "hour": hour,
-            "predicted": predicted,
-            "pending": self.pending.name if self.pending else None,
-            "action": action,
-        }
+        appliance_name = "none"
 
-        if self.pending is not None:
-            baseline_cost = self.pending.power_kw * price
-            must_run = hour >= self.pending.latest_finish_hour - self.pending.duration_hours
-            if action == 0 or must_run:
-                scheduled_cost = self.pending.power_kw * price
+        if appliance is not None:
+            appliance_name = appliance.name
+
+            # baseline = always run now
+            baseline_cost = predicted + appliance.power_kw
+
+            if action == 0:
+                # run now
+                scheduled_cost = predicted + appliance.power_kw
                 reward = baseline_cost - scheduled_cost
                 self.successes += 1
-                self.pending = None
-                self.pending_wait = 0
+                decision = "run_now"
             else:
-                scheduled_cost = 0.1  # inconvenience / standby penalty
+                # delay
+                scheduled_cost = predicted
                 reward = baseline_cost - scheduled_cost
-                self.pending_wait += 1
-                if hour + 1 > self.pending.latest_finish_hour:
-                    reward -= 3.0
-                    self.failures += 1
-                    self.pending = None
-                    self.pending_wait = 0
+                self.successes += 1
+                decision = "delay"
         else:
+            baseline_cost = predicted
+            scheduled_cost = predicted
             reward = 0.0
+            decision = "no_appliance"
 
-        self.current_episode_reward += reward
-        info["baseline_cost"] = baseline_cost
-        info["scheduled_cost"] = scheduled_cost
-        info["reward"] = reward
+        info = {
+            "datetime": str(dt) if dt is not None else None,
+            "hour": hour,
+            "predicted_demand_kw": predicted,
+            "actual_demand_kw": actual,
+            "appliance_name": appliance_name,
+            "decision": decision,
+            "baseline_cost": float(baseline_cost),
+            "scheduled_cost": float(scheduled_cost),
+            "reward": float(reward),
+        }
 
-        self.idx += 1
-        done = self.idx >= len(self.forecast_df)
-        next_state = self._get_state() if not done else (0, 0, 0)
+        self.index += 1
+        done = self.index >= len(self.df)
+
+        if done:
+            next_state = (0, 0, 0)
+        else:
+            next_state = self._get_state()
+
         return next_state, reward, done, info

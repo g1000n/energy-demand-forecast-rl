@@ -55,37 +55,51 @@ with tabs[0]:
     if forecast_metrics is not None:
         st.subheader("Forecast Metrics")
         st.dataframe(forecast_metrics, use_container_width=True)
+    else:
+        st.warning("forecast_metrics.csv not found.")
 
     if forecast_predictions is not None:
         df = forecast_predictions.copy()
-        df["datetime"] = pd.to_datetime(df["datetime"], errors="coerce")
+        if "datetime" in df.columns:
+            df["datetime"] = pd.to_datetime(df["datetime"], errors="coerce")
 
         st.subheader("Actual vs Predicted Demand")
-        model_choice = st.selectbox(
-            "Select prediction series",
-            ["baseline_pred", "lstm_pred", "tcn_pred"],
-            index=1
-        )
 
-        max_points = st.slider("Number of points to display", 100, 1000, 300, 50)
-        plot_df = df.head(max_points)
+        available_pred_cols = [c for c in ["baseline_pred", "lstm_pred", "tcn_pred"] if c in df.columns]
+        if available_pred_cols:
+            model_choice = st.selectbox(
+                "Select prediction series",
+                available_pred_cols,
+                index=min(1, len(available_pred_cols) - 1)
+            )
 
-        fig, ax = plt.subplots(figsize=(12, 5))
-        ax.plot(plot_df["datetime"], plot_df["actual"], label="Actual")
-        ax.plot(plot_df["datetime"], plot_df[model_choice], label=model_choice)
-        ax.set_title("Actual vs Predicted Demand")
-        ax.set_xlabel("Datetime")
-        ax.set_ylabel("Demand (kW)")
-        ax.legend()
-        st.pyplot(fig)
+            max_points = st.slider("Number of points to display", 100, 1000, 300, 50)
+            plot_df = df.head(max_points)
 
-        st.info(
-            "Interpretation: for each test hour, the model predicts the next-hour demand. "
-            "The closer the prediction line is to the actual line, the better the model performed."
-        )
+            fig, ax = plt.subplots(figsize=(12, 5))
+            if "datetime" in plot_df.columns:
+                ax.plot(plot_df["datetime"], plot_df["actual"], label="Actual")
+                ax.plot(plot_df["datetime"], plot_df[model_choice], label=model_choice)
+                ax.set_xlabel("Datetime")
+            else:
+                ax.plot(plot_df["actual"].values, label="Actual")
+                ax.plot(plot_df[model_choice].values, label=model_choice)
+                ax.set_xlabel("Step")
+
+            ax.set_title("Actual vs Predicted Demand")
+            ax.set_ylabel("Demand (kW)")
+            ax.legend()
+            st.pyplot(fig)
+
+            st.info(
+                "Interpretation: for each test hour, the model predicts the next-hour demand. "
+                "The closer the prediction line is to the actual line, the better the model performed."
+            )
 
         st.subheader("Forecast Predictions Sample")
         st.dataframe(df.head(20), use_container_width=True)
+    else:
+        st.warning("forecast_predictions.csv not found.")
 
 # -------------------------------
 # NLP Tab
@@ -100,6 +114,8 @@ with tabs[1]:
     if nlp_metrics is not None:
         st.subheader("NLP Metrics")
         st.dataframe(nlp_metrics, use_container_width=True)
+    else:
+        st.warning("nlp_metrics.csv not found.")
 
     cm_path = RESULTS / "nlp_confusion_matrix.png"
     if cm_path.exists():
@@ -123,17 +139,21 @@ with tabs[2]:
 
     if rl_summary is not None:
         c1, c2, c3 = st.columns(3)
-        c1.metric("Mean Final Reward", f"{rl_summary['mean_final_reward']:.2f}")
-        c2.metric("Mean Success Rate", f"{rl_summary['mean_success_rate']:.2f}")
-        c3.metric("Mean Cost Reduction", f"{rl_summary['mean_cost_reduction']:.2f}")
+        c1.metric("Mean Final Reward", f"{rl_summary.get('mean_final_reward', 0):.2f}")
+        c2.metric("Mean Success Rate", f"{rl_summary.get('mean_success_rate', 0):.2f}")
+        c3.metric("Mean Cost Reduction", f"{rl_summary.get('mean_cost_reduction', 0):.2f}")
 
         c4, c5 = st.columns(2)
-        c4.metric("Mean Baseline Cost", f"{rl_summary['mean_baseline_cost']:.2f}")
-        c5.metric("Mean Scheduled Cost", f"{rl_summary['mean_scheduled_cost']:.2f}")
+        c4.metric("Mean Baseline Cost", f"{rl_summary.get('mean_baseline_cost', 0):.2f}")
+        c5.metric("Mean Scheduled Cost", f"{rl_summary.get('mean_scheduled_cost', 0):.2f}")
+    else:
+        st.warning("rl_summary.json not found.")
 
     if rl_metrics is not None:
         st.subheader("RL Metrics by Seed")
         st.dataframe(rl_metrics, use_container_width=True)
+    else:
+        st.warning("rl_metrics_by_seed.csv not found.")
 
     curve_path = RESULTS / "rl_learning_curves.png"
     if curve_path.exists():
@@ -162,14 +182,15 @@ with tabs[3]:
     if rl_decisions is not None:
         df = rl_decisions.copy()
 
-        # Parse datetime if present
-        if "datetime" in df.columns:
+        st.subheader("Saved RL Decisions File")
+        st.write("Available columns in `rl_decisions_sample.csv`:")
+        st.code(", ".join(df.columns.astype(str).tolist()))
+
+        has_datetime = "datetime" in df.columns
+        if has_datetime:
             df["datetime"] = pd.to_datetime(df["datetime"], errors="coerce")
             df["date"] = df["datetime"].dt.date.astype(str)
-        else:
-            st.warning("No datetime column found in rl_decisions_sample.csv.")
-            st.dataframe(df.head(50), use_container_width=True)
-        if "datetime" in df.columns:
+
             available_dates = sorted(df["date"].dropna().unique().tolist())
             if available_dates:
                 selected_date = st.selectbox("Choose a simulated day", available_dates)
@@ -193,7 +214,6 @@ with tabs[3]:
                 else:
                     st.dataframe(day_df, use_container_width=True)
 
-                # Plot predicted vs actual if available
                 if {"datetime", "predicted_demand_kw", "actual_demand_kw"}.issubset(day_df.columns):
                     fig, ax = plt.subplots(figsize=(12, 5))
                     ax.plot(day_df["datetime"], day_df["predicted_demand_kw"], label="Predicted Demand")
@@ -204,33 +224,89 @@ with tabs[3]:
                     ax.legend()
                     st.pyplot(fig)
 
-                # Show one selected step
                 st.subheader("Step-by-Step Explanation")
                 step_idx = st.slider("Choose a simulation step", 0, max(len(day_df) - 1, 0), 0, 1)
                 row = day_df.iloc[step_idx]
 
                 st.markdown("### Current Step")
-                if "datetime" in row:
+                if "datetime" in row.index:
                     st.write(f"**Hour:** {row['datetime']}")
-                if "predicted_demand_kw" in row:
+                if "predicted_demand_kw" in row.index:
                     st.write(f"**Predicted demand:** {row['predicted_demand_kw']:.3f} kW")
-                if "actual_demand_kw" in row:
+                if "actual_demand_kw" in row.index:
                     st.write(f"**Actual demand:** {row['actual_demand_kw']:.3f} kW")
-                if "appliance_name" in row:
+                if "appliance_name" in row.index:
                     st.write(f"**Appliance request:** {row['appliance_name']}")
-                if "decision" in row:
+                if "decision" in row.index:
                     st.write(f"**RL action:** {row['decision']}")
-                if "baseline_cost" in row:
+                if "baseline_cost" in row.index:
                     st.write(f"**Baseline cost (run immediately):** {row['baseline_cost']:.3f}")
-                if "scheduled_cost" in row:
+                if "scheduled_cost" in row.index:
                     st.write(f"**Scheduled cost (RL policy):** {row['scheduled_cost']:.3f}")
-                if "reward" in row:
+                if "reward" in row.index:
                     st.write(f"**Reward at this step:** {row['reward']:.3f}")
 
                 st.success(
                     "Read this tab like a timeline: at each hour, the system forecasts demand, "
                     "checks whether a flexible appliance is waiting, chooses an action, and computes cost/reward."
                 )
+            else:
+                st.warning("The datetime column exists, but no valid dates were found.")
+        else:
+            st.warning(
+                "No datetime column found in rl_decisions_sample.csv. "
+                "The app can still show the saved decisions table below, but the timeline view needs "
+                "the RL file to be regenerated with datetime included."
+            )
+            st.dataframe(df.head(50), use_container_width=True)
+
+        st.markdown("---")
+        st.subheader("Interactive What-If Simulator")
+        st.write(
+            "This is a manual mini-simulation to help explain the project. "
+            "It does not retrain the RL agent live; it just demonstrates the effect of choosing run_now or delay."
+        )
+
+        appliance_choice = st.selectbox(
+            "Choose appliance",
+            ["dishwasher", "washing_machine", "water_heater"]
+        )
+
+        appliance_power_map = {
+            "dishwasher": 1.0,
+            "washing_machine": 1.2,
+            "water_heater": 0.8,
+        }
+
+        selected_hour = st.slider("Select simulated hour of day", 0, 23, 18, 1)
+        predicted_kw = st.number_input("Predicted demand (kW)", min_value=0.0, value=2.5, step=0.1)
+        actual_kw = st.number_input("Actual demand (kW)", min_value=0.0, value=2.7, step=0.1)
+        action_choice = st.radio("Choose RL action", ["run_now", "delay"])
+
+        appliance_power = appliance_power_map[appliance_choice]
+
+        baseline_cost = predicted_kw + appliance_power
+        if action_choice == "run_now":
+            scheduled_cost = predicted_kw + appliance_power
+        else:
+            scheduled_cost = predicted_kw
+
+        reward = baseline_cost - scheduled_cost
+
+        st.markdown("### What-If Result")
+        st.write(f"**Hour:** {selected_hour}:00")
+        st.write(f"**Appliance:** {appliance_choice}")
+        st.write(f"**Predicted demand:** {predicted_kw:.2f} kW")
+        st.write(f"**Actual demand:** {actual_kw:.2f} kW")
+        st.write(f"**Baseline cost (run immediately):** {baseline_cost:.2f}")
+        st.write(f"**Scheduled cost:** {scheduled_cost:.2f}")
+        st.write(f"**Reward:** {reward:.2f}")
+
+        if action_choice == "delay":
+            st.success("The appliance was delayed, so the scheduler avoided adding its load to the current hour.")
+        else:
+            st.info("The appliance was run immediately, so its power was added to the current hour.")
+
     else:
         st.warning("RL decisions file not found. Run the pipeline first.")
 
