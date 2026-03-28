@@ -1,59 +1,62 @@
+from __future__ import annotations
+
+from pathlib import Path
+
 import pandas as pd
 
-# File paths
-raw_data_path = "data/household_power_consumption.txt"
-processed_data_path = "data/processed_energy_hourly.csv"
+from src.utils.common import ensure_dirs, project_root
 
-# Load raw dataset
-df = pd.read_csv(
-    raw_data_path,
-    sep=";",
-    low_memory=False,
-    na_values=["?"]
-)
+RAW_FILENAME = "household_power_consumption.txt"
+PROCESSED_FILENAME = "processed_energy_hourly.csv"
 
-print("Raw data loaded successfully.")
-print("Shape before cleaning:", df.shape)
-print(df.head())
 
-# Combine Date and Time into one datetime column
-df["datetime"] = pd.to_datetime(
-    df["Date"] + " " + df["Time"],
-    format="%d/%m/%Y %H:%M:%S",
-    errors="coerce"
-)
+def build_processed_dataset() -> Path:
+    ensure_dirs()
+    root = project_root()
+    raw_path = root / "data" / RAW_FILENAME
+    processed_path = root / "data" / PROCESSED_FILENAME
 
-# Drop rows with invalid datetime
-df = df.dropna(subset=["datetime"])
+    if processed_path.exists():
+        return processed_path
 
-# Convert relevant columns to numeric
-numeric_columns = [
-    "Global_active_power",
-    "Global_reactive_power",
-    "Voltage",
-    "Global_intensity",
-    "Sub_metering_1",
-    "Sub_metering_2",
-    "Sub_metering_3"
-]
+    if not raw_path.exists():
+        raise FileNotFoundError(
+            f"Missing raw dataset: {raw_path}. Place {RAW_FILENAME} inside the data/ folder first."
+        )
 
-for col in numeric_columns:
-    df[col] = pd.to_numeric(df[col], errors="coerce")
+    df = pd.read_csv(raw_path, sep=";", low_memory=False, na_values=["?"])
+    df["datetime"] = pd.to_datetime(
+        df["Date"] + " " + df["Time"],
+        format="%d/%m/%Y %H:%M:%S",
+        errors="coerce",
+    )
+    df = df.dropna(subset=["datetime"]).set_index("datetime")
 
-# Fill missing numeric values
-df = df.ffill()
+    numeric_cols = [
+        "Global_active_power",
+        "Global_reactive_power",
+        "Voltage",
+        "Global_intensity",
+        "Sub_metering_1",
+        "Sub_metering_2",
+        "Sub_metering_3",
+    ]
+    for col in numeric_cols:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
 
-# Set datetime as the index
-df = df.set_index("datetime")
+    df[numeric_cols] = df[numeric_cols].ffill().bfill()
+    hourly = df[numeric_cols].resample("h").mean().reset_index()
 
-# Resample to hourly averages
-df_hourly = df[numeric_columns].resample("h").mean()
+    hourly["hour"] = hourly["datetime"].dt.hour
+    hourly["dayofweek"] = hourly["datetime"].dt.dayofweek
+    hourly["month"] = hourly["datetime"].dt.month
+    hourly["is_weekend"] = hourly["dayofweek"].isin([5, 6]).astype(int)
+    hourly["sin_hour"] = hourly["hour"].apply(lambda x: __import__("math").sin(2 * __import__("math").pi * x / 24))
+    hourly["cos_hour"] = hourly["hour"].apply(lambda x: __import__("math").cos(2 * __import__("math").pi * x / 24))
 
-print("\nHourly aggregated data:")
-print(df_hourly.head())
-print("Shape after hourly resampling:", df_hourly.shape)
+    hourly.to_csv(processed_path, index=False)
+    return processed_path
 
-# Save processed dataset
-df_hourly.to_csv(processed_data_path)
 
-print(f"\nProcessed hourly dataset saved to: {processed_data_path}")
+if __name__ == "__main__":
+    print(build_processed_dataset())

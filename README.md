@@ -1,36 +1,81 @@
 # Energy Demand Forecasting + RL Load Scheduling
 
-## Overview
-This project develops an artificial intelligence system that predicts electricity demand using time-series forecasting and optimizes flexible energy load scheduling using reinforcement learning.
+## Project Overview
+This project implements the **6INTELSY Option 7** system: a time-series AI pipeline that forecasts short-term household electricity demand and uses a simple reinforcement learning scheduler to shift flexible loads away from higher-demand periods. The repository includes:
 
-The system forecasts short-term electricity demand based on historical consumption data and uses the predictions to guide a reinforcement learning agent that shifts energy usage away from peak demand periods.
+- **Core deep learning model:** LSTM forecaster
+- **CNN component:** TCN forecaster
+- **NLP component:** auxiliary demand-text classifier
+- **RL component:** Q-learning load scheduler in offline simulation
+- **Full ML pipeline:** preprocessing, training, evaluation, ablations, error/slice analysis, and reproducible outputs
 
-## Components
-- Baseline forecasting model (Linear Regression)
-- LSTM deep learning forecasting model
-- CNN-based Temporal Convolutional Network (TCN) comparison
-- Reinforcement learning load scheduling agent
-- Lightweight NLP text classifier
+## Dataset Choice
+The primary dataset is the **UCI Individual Household Electric Power Consumption Dataset**. It is the best fit for this project because it contains household-level minute data over almost 4 years, includes multiple electrical measurements and sub-metering fields, and naturally supports both forecasting and household load-scheduling simulation.
 
-## Dataset
-UCI Individual Household Electric Power Consumption Dataset  
-https://archive.ics.uci.edu/ml/datasets/individual+household+electric+power+consumption
+Raw dataset file expected in `data/`:
+- `household_power_consumption.txt`
 
-The dataset contains electricity consumption measurements collected at one-minute intervals over approximately four years.
+## Quick Start
+1. Put `household_power_consumption.txt` inside the `data/` folder.
+2. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+3. Run the full pipeline:
+   ```bash
+   bash run.sh
+   ```
 
-## Evaluation Metrics
-The system will be evaluated using:
+## Repository Structure
+```text
+project-root/
+├── README.md
+├── requirements.txt
+├── run.py
+├── run.sh
+├── data/
+├── src/
+│   ├── data_pipeline.py
+│   ├── train.py
+│   ├── eval.py
+│   ├── nlp_classifier.py
+│   ├── energy_env.py
+│   ├── rl_agent.py
+│   ├── utils/
+│   └── models/
+├── configs/
+├── logs/
+├── results/
+├── experiments/
+├── notebooks/
+└── docs/
+```
 
-- Mean Absolute Error (MAE)
-- Mean Absolute Percentage Error (MAPE)
-- Reinforcement learning reward and cost reduction compared to baseline scheduling.
+## Main Outputs
+After running the pipeline, the project generates:
+- processed hourly dataset
+- forecasting metrics (MAE, MAPE) for baseline, LSTM, and TCN
+- ablation results
+- error/slice analysis
+- NLP metrics (Accuracy, Macro-F1, Confusion Matrix)
+- RL metrics (reward curves, success rate, cost vs baseline, variance across seeds)
+- plots and CSV/JSON summaries in `results/` and `logs/`
 
-## How to Run
+## Models and Baselines
+- **Non-DL baseline:** Linear Regression with lag + time features
+- **DL baseline:** TCN forecaster
+- **Core model:** LSTM forecaster
+- **Ablations:**
+  1. LSTM vs TCN
+  2. With time features vs without time features (Linear Regression)
 
-Install dependencies:
+## Reproducibility Notes
+- Fixed seeds are used.
+- Temporal train/validation/test split is used to avoid leakage.
+- Early stopping is used for LSTM and TCN.
+- Runtime is constrained to modest epochs so the full pipeline can finish well within the course limit on a normal laptop or mid-range GPU.
 
-pip install -r requirements.txt
-
-Run the training pipeline:
-
-python src/train.py
+## Suggested Release Tags
+- `v0.1` Proposal
+- `v0.9` Release candidate
+- `v1.0` Final submission
