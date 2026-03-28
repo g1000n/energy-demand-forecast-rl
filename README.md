@@ -226,23 +226,19 @@ After the pipeline is executed, the project generates:
 - time-of-day slices
 - weekday vs weekend slices
 
----
-
 ## How to Run
 
 Follow these steps to reproduce the full system.
-
----
 
 ### 1. Clone the repository
 
 git clone https://github.com/g1000n/energy-demand-forecast-rl/tree/main
 
-## cd energy-demand-forecast-rl
+### cd energy-demand-forecast-rl
 
 ### 2. Create and activate a virtual environment
 
-# Windows (PowerShell)
+### Windows (PowerShell)
 
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
@@ -252,18 +248,14 @@ If activation is blocked:
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 .\.venv\Scripts\Activate.ps1
 
-# macOS / Linux / Git Bash
+### macOS / Linux / Git Bash
 
 python3 -m venv .venv
 source .venv/bin/activate
 
----
-
 ### 3. Install dependencies
 
-## pip install -r requirements.txt
-
----
+### pip install -r requirements.txt
 
 ### 4. Prepare dataset
 
@@ -273,23 +265,19 @@ https://archive.ics.uci.edu/ml/datasets/individual+household+electric+power+cons
 Then place the file inside:
 data/household_power_consumption.txt
 
----
-
 ### 5. Run the full pipeline
 
 # Windows
 
 python run.py
 
-# macOS / Linux / Git Bash
+### macOS / Linux / Git Bash
 
 bash run.sh
 
 Outputs will be saved in:
 results/
 logs/
-
----
 
 ### 6. Run the dashboard
 
