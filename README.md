@@ -234,7 +234,7 @@ Follow these steps to reproduce the full system.
 
 git clone https://github.com/g1000n/energy-demand-forecast-rl/tree/main
 
-### cd energy-demand-forecast-rl
+cd energy-demand-forecast-rl
 
 ### 2. Create and activate a virtual environment
 
