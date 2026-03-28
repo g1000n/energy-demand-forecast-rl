@@ -267,7 +267,7 @@ data/household_power_consumption.txt
 
 ### 5. Run the full pipeline
 
-# Windows
+### Windows
 
 python run.py
 
