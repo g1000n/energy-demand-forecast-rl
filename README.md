@@ -1,7 +1,10 @@
 # Energy Demand Forecasting + RL Load Scheduling
 
 ## Project Overview
-This project implements the **6INTELSY Option 7** system: a time-series AI pipeline that forecasts short-term household electricity demand and uses a simple reinforcement learning scheduler to shift flexible loads away from higher-demand periods. The repository includes:
+
+This project implements **6INTELSY Option 7: Energy Demand Forecasting + RL Load Scheduling**. The system uses historical household electricity data to forecast short-term energy demand and then applies a simple reinforcement learning scheduler to decide whether flexible appliances should run immediately or be delayed to reduce proxy energy cost.
+
+The project includes all required components for the course specification:
 
 - **Core deep learning model:** LSTM forecaster
 - **CNN component:** TCN forecaster
@@ -9,73 +12,239 @@ This project implements the **6INTELSY Option 7** system: a time-series AI pipel
 - **RL component:** Q-learning load scheduler in offline simulation
 - **Full ML pipeline:** preprocessing, training, evaluation, ablations, error/slice analysis, and reproducible outputs
 
-## Dataset Choice
-The primary dataset is the **UCI Individual Household Electric Power Consumption Dataset**. It is the best fit for this project because it contains household-level minute data over almost 4 years, includes multiple electrical measurements and sub-metering fields, and naturally supports both forecasting and household load-scheduling simulation.
+This project is implemented as an **offline simulation prototype**, not a real-time deployed smart-home controller.
 
-Raw dataset file expected in `data/`:
+---
+
+## Course Requirement Coverage
+
+This repository was designed to satisfy the major requirements of the 6INTELSY final project:
+
+### Minimum Technical Expectations
+
+- At least one model built from scratch
+- One core deep learning model
+- One CNN component
+- One NLP component
+- One RL component
+- One complete ML pipeline from data preparation to evaluation and analysis
+
+### Evaluation Coverage
+
+- **Time-series:** MAE, MAPE
+- **NLP:** Accuracy, Macro-F1, Confusion Matrix
+- **RL:** learning curves, success rate, reward vs baseline policy, variance across seeds
+
+### Reproducibility
+
+- `requirements.txt`
+- `run.py` for one-command pipeline execution on Windows
+- `run.sh` for shell-based execution
+- organized project structure
+- saved outputs in `results/` and `logs/`
+
+---
+
+## Problem Statement
+
+The system aims to answer two connected questions:
+
+1. **Forecasting:**  
+   Given historical household electricity usage, how much demand is expected in the next hour?
+
+2. **Scheduling:**  
+   Given that forecast, should a flexible appliance run now or be delayed to a later hour to reduce proxy electricity cost?
+
+---
+
+## Dataset Choice
+
+The primary dataset is the **UCI Individual Household Electric Power Consumption Dataset**.
+
+It was chosen because:
+
+- it is household-level data, which fits the project task
+- it contains minute-level electricity measurements over almost 4 years
+- it includes multiple electrical variables and sub-metering values
+- it supports both forecasting and realistic household load-scheduling simulation
+
+### Expected raw dataset file
+
+Place this file in the `data/` folder:
+
 - `household_power_consumption.txt`
 
-## Quick Start
-1. Put `household_power_consumption.txt` inside the `data/` folder.
-2. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-3. Run the full pipeline:
-   ```bash
-   bash run.sh
-   ```
+---
 
-## Repository Structure
-```text
-project-root/
-├── README.md
-├── requirements.txt
-├── run.py
-├── run.sh
-├── data/
-├── src/
-│   ├── data_pipeline.py
-│   ├── train.py
-│   ├── eval.py
-│   ├── nlp_classifier.py
-│   ├── energy_env.py
-│   ├── rl_agent.py
-│   ├── utils/
-│   └── models/
-├── configs/
-├── logs/
-├── results/
-├── experiments/
-├── notebooks/
-└── docs/
-```
+## Data Preparation
+
+The raw minute-level dataset is converted into an **hourly dataset** to make forecasting and simulation more manageable.
+
+### Preprocessing steps
+
+- combine `Date` and `Time` into one `datetime` column
+- convert measurement fields to numeric
+- handle missing values using forward-fill and backward-fill
+- resample data into hourly averages
+- generate time-based features:
+  - `hour`
+  - `dayofweek`
+  - `month`
+  - `is_weekend`
+  - `sin_hour`
+  - `cos_hour`
+
+### Final split strategy
+
+A **chronological temporal split** is used to avoid data leakage:
+
+- **70% training**
+- **15% validation**
+- **15% testing**
+
+This follows time-series best practice and keeps future data from leaking into the training stage.
+
+---
+
+## System Components
+
+### 1. Forecasting Models
+
+The forecasting stage predicts the next-hour household electricity demand.
+
+Models included:
+
+- **Linear Regression baseline** using lag and time features
+- **LSTM** as the main deep learning forecasting model
+- **TCN** as the CNN-based time-series model
+
+### 2. NLP Auxiliary Module
+
+The NLP component is a lightweight text classifier that assigns simple demand-related labels to generated demand descriptions.
+
+Its purpose is **auxiliary**, not central. It demonstrates the required NLP component and shows how textual demand context could be incorporated into a broader intelligent energy system.
+
+Example labels:
+
+- low demand
+- medium demand
+- high demand
+
+### 3. RL Scheduling Module
+
+The reinforcement learning component is a **Q-learning scheduler** operating in an offline simulation environment.
+
+It decides whether a flexible appliance should:
+
+- **run now**
+- **delay**
+
+The RL environment uses:
+
+- forecasted demand
+- appliance properties
+- proxy energy cost
+- scheduling constraints
+
+Example appliance templates in the simulation:
+
+- dishwasher
+- washing machine
+- water heater
+
+### 4. Dashboard / Interface
+
+A Streamlit dashboard is included to visualize:
+
+- forecast metrics
+- actual vs predicted demand
+- NLP results
+- RL learning curves
+- RL scheduling decisions
+- baseline vs scheduled cost
+
+---
+
+## Offline Simulation Explanation
+
+This project does **not** wait in real time.
+
+Instead, the system simulates time by stepping through the **test portion of the hourly dataset**.
+
+For each simulated hour:
+
+1. the system reads the hour and demand context
+2. the forecaster predicts demand
+3. the RL scheduler observes the state
+4. the scheduler chooses whether to run or delay a flexible appliance
+5. the system computes reward based on proxy cost reduction
+6. results are saved for analysis
+
+This means the system behaves like a time-based controller, but runs quickly as an offline experiment.
+
+---
 
 ## Main Outputs
-After running the pipeline, the project generates:
-- processed hourly dataset
-- forecasting metrics (MAE, MAPE) for baseline, LSTM, and TCN
-- ablation results
-- error/slice analysis
-- NLP metrics (Accuracy, Macro-F1, Confusion Matrix)
-- RL metrics (reward curves, success rate, cost vs baseline, variance across seeds)
-- plots and CSV/JSON summaries in `results/` and `logs/`
+
+After the pipeline is executed, the project generates:
+
+### Forecasting
+
+- `forecast_predictions.csv`
+- `forecast_metrics.csv`
+- `forecast_actual_vs_predicted.png`
+- `training_curve_lstm.png`
+- `training_curve_tcn.png`
+
+### NLP
+
+- `nlp_metrics.csv`
+- `nlp_confusion_matrix.png`
+
+### RL
+
+- `rl_learning_curves.png`
+- `rl_metrics_by_seed.csv`
+- `rl_decisions_sample.csv`
+- `rl_summary.json`
+
+### Additional Outputs
+
+- processed hourly dataset in `data/`
+- logs and JSON summaries in `logs/`
+
+---
 
 ## Models and Baselines
-- **Non-DL baseline:** Linear Regression with lag + time features
-- **DL baseline:** TCN forecaster
-- **Core model:** LSTM forecaster
-- **Ablations:**
-  1. LSTM vs TCN
-  2. With time features vs without time features (Linear Regression)
 
-## Reproducibility Notes
-- Fixed seeds are used.
-- Temporal train/validation/test split is used to avoid leakage.
-- Early stopping is used for LSTM and TCN.
-- Runtime is constrained to modest epochs so the full pipeline can finish well within the course limit on a normal laptop or mid-range GPU.
+### Non-DL baseline
 
-## Suggested Release Tags
-- `v0.1` Proposal
-- `v0.9` Release candidate
-- `v1.0` Final submission
+- Linear Regression with lag + time features
+
+### DL models
+
+- LSTM forecaster
+- TCN forecaster
+
+### Ablations
+
+- LSTM vs TCN
+- Linear Regression with time features vs reduced/simple baseline setup
+
+### Error Analysis
+
+- worst-case forecast examples
+- slice analysis through evaluation outputs
+
+---
+
+## How to Run
+
+### 1. Create and activate a virtual environment
+
+#### Windows PowerShell
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+```
