@@ -230,11 +230,70 @@ After the pipeline is executed, the project generates:
 
 ## How to Run
 
-### 1. Create and activate a virtual environment
+Follow these steps to reproduce the full system.
 
-#### Windows PowerShell
+---
 
-```powershell
+### 1. Clone the repository
+
+git clone https://github.com/g1000n/energy-demand-forecast-rl/tree/main
+
+## cd energy-demand-forecast-rl
+
+### 2. Create and activate a virtual environment
+
+# Windows (PowerShell)
+
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-```
+
+If activation is blocked:
+
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\.venv\Scripts\Activate.ps1
+
+# macOS / Linux / Git Bash
+
+python3 -m venv .venv
+source .venv/bin/activate
+
+---
+
+### 3. Install dependencies
+
+## pip install -r requirements.txt
+
+---
+
+### 4. Prepare dataset
+
+Download the dataset from:
+https://archive.ics.uci.edu/ml/datasets/individual+household+electric+power+consumption
+
+Then place the file inside:
+data/household_power_consumption.txt
+
+---
+
+### 5. Run the full pipeline
+
+# Windows
+
+python run.py
+
+# macOS / Linux / Git Bash
+
+bash run.sh
+
+Outputs will be saved in:
+results/
+logs/
+
+---
+
+### 6. Run the dashboard
+
+streamlit run app.py
+
+Then open:
+http://localhost:8501
