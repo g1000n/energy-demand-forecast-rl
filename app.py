@@ -105,10 +105,11 @@ with tabs[0]:
 # NLP Tab
 # -------------------------------
 with tabs[1]:
-    st.header("NLP Auxiliary Module")
+    st.header("NLP Supporting Module")
     st.write(
-        "This is an auxiliary text-classification component included to satisfy the NLP requirement. "
-        "It is not the main forecasting engine. It classifies simple demand-related text into categories."
+        "This module performs text classification on short demand-context descriptions generated from "
+        "the household energy data. Its role is to provide an interpretable text-based demand trend layer "
+        "that supports the forecasting and scheduling pipeline."
     )
 
     if nlp_metrics is not None:
@@ -122,9 +123,16 @@ with tabs[1]:
         st.subheader("Confusion Matrix")
         st.image(str(cm_path), use_container_width=True)
 
+    nlp_preds = safe_read_csv(RESULTS / "nlp_predictions.csv")
+    if nlp_preds is not None:
+        st.subheader("Example NLP Predictions")
+        show_cols = [c for c in ["datetime", "text", "true_label", "predicted_label"] if c in nlp_preds.columns]
+        st.dataframe(nlp_preds[show_cols].head(20), use_container_width=True)
+
     st.info(
-        "Interpretation: this module demonstrates an NLP component in the project. "
-        "It supports the system as an auxiliary experiment, but the main task is still forecasting and RL scheduling."
+        "Interpretation: the NLP component classifies demand-context text such as "
+        "'high evening demand on weekday' into trend categories like increase, stable, or decrease. "
+        "This supports the pipeline by making forecast conditions easier to interpret in human-readable form."
     )
 
 # -------------------------------

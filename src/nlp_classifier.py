@@ -1,100 +1,150 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import ConfusionMatrixDisplay, accuracy_score, confusion_matrix, f1_score
+from sklearn.metrics import accuracy_score, confusion_matrix, f1_score, ConfusionMatrixDisplay
 from sklearn.model_selection import train_test_split
 
-from src.utils.common import ensure_dirs, project_root, save_json, set_seed
+
+def project_root() -> Path:
+    return Path(__file__).resolve().parents[1]
 
 
-LABEL_ORDER = ["decrease", "stable", "increase"]
+def ensure_dirs(root: Path) -> tuple[Path, Path]:
+    results_dir = root / "results"
+    logs_dir = root / "logs"
+    results_dir.mkdir(parents=True, exist_ok=True)
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    return results_dir, logs_dir
 
 
-def _label_from_delta(delta: float) -> str:
-    if delta < -0.08:
-        return "decrease"
-    if delta > 0.08:
-        return "increase"
-    return "stable"
+def build_text_features(df: pd.DataFrame) -> pd.DataFrame:
+    data = df.copy()
+    data["datetime"] = pd.to_datetime(data["datetime"], errors="coerce")
+    data = data.dropna(subset=["datetime"]).reset_index(drop=True)
 
+    data["hour"] = data["datetime"].dt.hour
+    data["is_weekend"] = data["datetime"].dt.dayofweek.isin([5, 6]).astype(int)
 
-def _band_from_value(value: float, q1: float, q2: float) -> str:
-    if value <= q1:
-        return "low"
-    if value <= q2:
-        return "medium"
-    return "high"
+    def demand_band(x: float) -> str:
+        if x < 1.0:
+            return "low"
+        elif x < 2.0:
+            return "medium"
+        return "high"
 
+    def time_bucket(h: int) -> str:
+        if 0 <= h <= 5:
+            return "overnight"
+        elif 6 <= h <= 11:
+            return "morning"
+        elif 12 <= h <= 17:
+            return "afternoon"
+        return "evening"
 
-def _build_text_dataset(df: pd.DataFrame) -> pd.DataFrame:
-    values = df["Global_active_power"].values
-    q1, q2 = df["Global_active_power"].quantile([0.33, 0.66]).tolist()
-    rows = []
-    for i in range(1, len(df)):
-        current = values[i]
-        prev = values[i - 1]
-        delta = (current - prev) / max(abs(prev), 1e-6)
-        label = _label_from_delta(delta)
-        hour = int(df.iloc[i]["hour"])
-        dow = int(df.iloc[i]["dayofweek"])
-        demand_band = _band_from_value(current, q1, q2)
-        prev_band = _band_from_value(prev, q1, q2)
-        weekend = "weekend" if int(df.iloc[i]["is_weekend"]) == 1 else "weekday"
-        text = f"{weekend} hour_{hour} day_{dow} current_{demand_band} previous_{prev_band}"
-        rows.append({"text": text, "label": label})
-    return pd.DataFrame(rows)
+    data["next_power"] = data["Global_active_power"].shift(-1)
+    data = data.dropna(subset=["next_power"]).copy()
+
+    delta = data["next_power"] - data["Global_active_power"]
+
+    def trend_label(d: float) -> str:
+        if d > 0.10:
+            return "increase"
+        elif d < -0.10:
+            return "decrease"
+        return "stable"
+
+    data["label"] = delta.apply(trend_label)
+
+    data["demand_band"] = data["Global_active_power"].apply(demand_band)
+    data["time_bucket"] = data["hour"].apply(time_bucket)
+    data["week_type"] = np.where(data["is_weekend"] == 1, "weekend", "weekday")
+
+    data["text"] = (
+        data["demand_band"]
+        + " "
+        + data["time_bucket"]
+        + " demand on "
+        + data["week_type"]
+    )
+
+    return data[["datetime", "text", "label", "Global_active_power", "next_power"]].rename(
+        columns={"Global_active_power": "current_power"}
+    )
 
 
 def run_nlp_experiment(processed_csv_path: str) -> dict[str, float]:
-    ensure_dirs()
-    set_seed(42)
     root = project_root()
-    results_dir = root / "results"
-    logs_dir = root / "logs"
+    results_dir, logs_dir = ensure_dirs(root)
 
     df = pd.read_csv(processed_csv_path)
-    text_df = _build_text_dataset(df)
-    x_train, x_test, y_train, y_test = train_test_split(
+    text_df = build_text_features(df)
+
+    X_train, X_test, y_train, y_test, meta_train, meta_test = train_test_split(
         text_df["text"],
         text_df["label"],
+        text_df[["datetime", "current_power", "next_power"]],
         test_size=0.2,
-        shuffle=False,
+        random_state=42,
+        stratify=text_df["label"],
     )
 
-    vec = TfidfVectorizer(ngram_range=(1, 2), min_df=2)
-    x_train_vec = vec.fit_transform(x_train)
-    x_test_vec = vec.transform(x_test)
+    vectorizer = TfidfVectorizer(ngram_range=(1, 2))
+    X_train_vec = vectorizer.fit_transform(X_train)
+    X_test_vec = vectorizer.transform(X_test)
 
-    clf = LogisticRegression(max_iter=200, random_state=42)
-    clf.fit(x_train_vec, y_train)
-    preds = clf.predict(x_test_vec)
+    clf = LogisticRegression(max_iter=1000)
+    clf.fit(X_train_vec, y_train)
 
-    accuracy = float(accuracy_score(y_test, preds))
-    macro_f1 = float(f1_score(y_test, preds, average="macro"))
-    cm = confusion_matrix(y_test, preds, labels=LABEL_ORDER)
+    y_pred = clf.predict(X_test_vec)
 
-    disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=LABEL_ORDER)
-    disp.plot(cmap="Blues", values_format="d")
-    plt.title("NLP Confusion Matrix")
+    accuracy = float(accuracy_score(y_test, y_pred))
+    macro_f1 = float(f1_score(y_test, y_pred, average="macro"))
+
+    metrics_df = pd.DataFrame([{
+        "accuracy": accuracy,
+        "macro_f1": macro_f1,
+        "num_samples": len(text_df),
+    }])
+    metrics_df.to_csv(results_dir / "nlp_metrics.csv", index=False)
+
+    labels = sorted(text_df["label"].unique().tolist())
+    cm = confusion_matrix(y_test, y_pred, labels=labels)
+    disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=labels)
+
+    fig, ax = plt.subplots(figsize=(6, 5))
+    disp.plot(ax=ax, values_format="d", colorbar=False)
+    ax.set_title("NLP Confusion Matrix")
     plt.tight_layout()
     plt.savefig(results_dir / "nlp_confusion_matrix.png")
     plt.close()
 
-    metrics = {
+    pred_df = meta_test.copy()
+    pred_df["text"] = X_test.values
+    pred_df["true_label"] = y_test.values
+    pred_df["predicted_label"] = y_pred
+    pred_df = pred_df.sort_values("datetime")
+    pred_df.to_csv(results_dir / "nlp_predictions.csv", index=False)
+
+    summary = {
         "accuracy": accuracy,
         "macro_f1": macro_f1,
         "num_samples": int(len(text_df)),
     }
-    pd.DataFrame([metrics]).to_csv(results_dir / "nlp_metrics.csv", index=False)
-    save_json(logs_dir / "nlp_metrics.json", metrics)
-    return metrics
+
+    with open(logs_dir / "nlp_summary.json", "w", encoding="utf-8") as f:
+        json.dump(summary, f, indent=2)
+
+    print(summary)
+    return summary
 
 
 if __name__ == "__main__":
-    processed = str(project_root() / "data" / "processed_energy_hourly.csv")
-    print(run_nlp_experiment(processed))
+    root = project_root()
+    run_nlp_experiment(str(root / "data" / "processed_energy_hourly.csv"))

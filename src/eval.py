@@ -1,15 +1,12 @@
 from __future__ import annotations
 
 from pathlib import Path
-import json
 
-import matplotlib.pyplot as plt
+import json
 import numpy as np
 import pandas as pd
 
-
-def project_root() -> Path:
-    return Path(__file__).resolve().parents[1]
+from src.utils.common import ensure_dirs, project_root
 
 
 def mean_absolute_percentage_error(y_true: np.ndarray, y_pred: np.ndarray) -> float:
@@ -17,25 +14,12 @@ def mean_absolute_percentage_error(y_true: np.ndarray, y_pred: np.ndarray) -> fl
     return float(np.mean(np.abs((y_true - y_pred) / np.maximum(np.abs(y_true), eps))))
 
 
-def ensure_dirs(root: Path) -> tuple[Path, Path]:
-    results_dir = root / "results"
-    logs_dir = root / "logs"
-    results_dir.mkdir(parents=True, exist_ok=True)
-    logs_dir.mkdir(parents=True, exist_ok=True)
-    return results_dir, logs_dir
-
-
 def compute_metrics(y_true: pd.Series, y_pred: pd.Series) -> dict[str, float]:
     y_true_np = y_true.to_numpy(dtype=float)
     y_pred_np = y_pred.to_numpy(dtype=float)
-
     mae = float(np.mean(np.abs(y_true_np - y_pred_np)))
     mape = mean_absolute_percentage_error(y_true_np, y_pred_np)
-
-    return {
-        "mae": mae,
-        "mape": mape,
-    }
+    return {"mae": mae, "mape": mape}
 
 
 def add_time_slices(df: pd.DataFrame) -> pd.DataFrame:
@@ -52,8 +36,7 @@ def add_time_slices(df: pd.DataFrame) -> pd.DataFrame:
             return "morning"
         elif 12 <= h <= 17:
             return "afternoon"
-        else:
-            return "evening"
+        return "evening"
 
     out["time_of_day"] = out["hour"].apply(hour_bucket)
     out["day_type"] = np.where(out["is_weekend"] == 1, "weekend", "weekday")
@@ -62,21 +45,17 @@ def add_time_slices(df: pd.DataFrame) -> pd.DataFrame:
 
 def save_forecast_metrics(preds: pd.DataFrame, results_dir: Path) -> pd.DataFrame:
     rows = []
+    model_map = {
+        "lag_only_baseline": "lag_only_pred",
+        "baseline": "baseline_pred",
+        "lstm": "lstm_pred",
+        "tcn": "tcn_pred",
+    }
 
-    model_cols = [
-        ("baseline", "baseline_pred"),
-        ("lstm", "lstm_pred"),
-        ("tcn", "tcn_pred"),
-    ]
-
-    for model_name, col in model_cols:
+    for name, col in model_map.items():
         if col in preds.columns:
             m = compute_metrics(preds["actual"], preds[col])
-            rows.append({
-                "model": model_name,
-                "mae": m["mae"],
-                "mape": m["mape"],
-            })
+            rows.append({"model": name, "mae": m["mae"], "mape": m["mape"]})
 
     metrics_df = pd.DataFrame(rows)
     metrics_df.to_csv(results_dir / "forecast_metrics.csv", index=False)
@@ -87,6 +66,7 @@ def save_ablation_results(preds: pd.DataFrame, results_dir: Path) -> pd.DataFram
     rows = []
 
     candidates = [
+        ("Lag-Only Baseline", "lag_only_pred", "Non-DL baseline using previous value only"),
         ("Linear Regression Baseline", "baseline_pred", "Non-DL baseline with lag/time features"),
         ("LSTM", "lstm_pred", "Core deep learning forecaster"),
         ("TCN", "tcn_pred", "CNN-based time-series forecaster"),
@@ -110,12 +90,10 @@ def save_ablation_results(preds: pd.DataFrame, results_dir: Path) -> pd.DataFram
 
 def save_slice_analysis(preds: pd.DataFrame, results_dir: Path) -> pd.DataFrame:
     df = add_time_slices(preds)
-
     rows = []
-    model_cols = [c for c in ["baseline_pred", "lstm_pred", "tcn_pred"] if c in df.columns]
+    model_cols = [c for c in ["lag_only_pred", "baseline_pred", "lstm_pred", "tcn_pred"] if c in df.columns]
 
     for model_col in model_cols:
-        # By time of day
         for slice_name, slice_df in df.groupby("time_of_day"):
             m = compute_metrics(slice_df["actual"], slice_df[model_col])
             rows.append({
@@ -127,7 +105,6 @@ def save_slice_analysis(preds: pd.DataFrame, results_dir: Path) -> pd.DataFrame:
                 "mape": m["mape"],
             })
 
-        # By weekday/weekend
         for slice_name, slice_df in df.groupby("day_type"):
             m = compute_metrics(slice_df["actual"], slice_df[model_col])
             rows.append({
@@ -150,28 +127,34 @@ def save_worst_cases(preds: pd.DataFrame, results_dir: Path, top_k: int = 20) ->
 
     if "lstm_pred" in df.columns:
         df["abs_error_lstm"] = (df["actual"] - df["lstm_pred"]).abs()
-    else:
-        df["abs_error_lstm"] = np.nan
-
     if "tcn_pred" in df.columns:
         df["abs_error_tcn"] = (df["actual"] - df["tcn_pred"]).abs()
-    else:
-        df["abs_error_tcn"] = np.nan
+    if "baseline_pred" in df.columns:
+        df["abs_error_baseline"] = (df["actual"] - df["baseline_pred"]).abs()
 
-    worst_df = df.sort_values("abs_error_lstm", ascending=False).head(top_k).copy()
+    sort_col = "abs_error_lstm" if "abs_error_lstm" in df.columns else df.columns[-1]
+    worst_df = df.sort_values(sort_col, ascending=False).head(top_k).copy()
     worst_df.to_csv(results_dir / "forecast_worst_cases.csv", index=False)
     return worst_df
 
 
-def save_summary_json(
-    metrics_df: pd.DataFrame,
-    ablation_df: pd.DataFrame,
-    slice_df: pd.DataFrame,
-    worst_df: pd.DataFrame,
-    logs_dir: Path,
-) -> dict:
+def main():
+    root = project_root()
+    results_dir, logs_dir = ensure_dirs()
+
+    preds_path = results_dir / "forecast_predictions.csv"
+    if not preds_path.exists():
+        raise FileNotFoundError(f"Missing forecast_predictions.csv at {preds_path}")
+
+    preds = pd.read_csv(preds_path)
+
+    metrics_df = save_forecast_metrics(preds, results_dir)
+    ablation_df = save_ablation_results(preds, results_dir)
+    slice_df = save_slice_analysis(preds, results_dir)
+    worst_df = save_worst_cases(preds, results_dir, top_k=20)
+
     summary = {
-        "forecast_models": metrics_df.to_dict(orient="records"),
+        "num_models_evaluated": int(len(metrics_df)),
         "num_ablation_rows": int(len(ablation_df)),
         "num_slice_rows": int(len(slice_df)),
         "worst_case_count": int(len(worst_df)),
@@ -180,40 +163,17 @@ def save_summary_json(
     with open(logs_dir / "eval_summary.json", "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2)
 
-    return summary
-
-
-def main():
-    root = project_root()
-    results_dir, logs_dir = ensure_dirs(root)
-
-    preds_path = results_dir / "forecast_predictions.csv"
-    if not preds_path.exists():
-        raise FileNotFoundError(
-            f"Missing forecast predictions file: {preds_path}. Run training first."
-        )
-
-    preds = pd.read_csv(preds_path)
-
-    metrics_df = save_forecast_metrics(preds, results_dir)
-    ablation_df = save_ablation_results(preds, results_dir)
-    slice_df = save_slice_analysis(preds, results_dir)
-    worst_df = save_worst_cases(preds, results_dir, top_k=20)
-    summary = save_summary_json(metrics_df, ablation_df, slice_df, worst_df, logs_dir)
-
-    # Keep a simple stdout summary for run.py
+    # Print concise summary for run.py
     lstm_row = metrics_df[metrics_df["model"] == "lstm"]
     tcn_row = metrics_df[metrics_df["model"] == "tcn"]
 
-    output = {
+    print({
         "lstm_mae": float(lstm_row["mae"].iloc[0]) if not lstm_row.empty else None,
         "lstm_mape": float(lstm_row["mape"].iloc[0]) if not lstm_row.empty else None,
         "tcn_mae": float(tcn_row["mae"].iloc[0]) if not tcn_row.empty else None,
         "tcn_mape": float(tcn_row["mape"].iloc[0]) if not tcn_row.empty else None,
         "worst_case_count": summary["worst_case_count"],
-    }
-
-    print(output)
+    })
 
 
 if __name__ == "__main__":
