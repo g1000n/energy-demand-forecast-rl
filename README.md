@@ -67,7 +67,7 @@ pip install -r requirements.txt
 ### 4. Prepare the Dataset
 
 Download the **UCI Individual Household Electric Power Consumption Dataset** and place the file here:
-
+- Source: https://archive.ics.uci.edu/dataset/235/individual+household+electric+power+consumption
 ```
 data/household_power_consumption.txt
 ```
