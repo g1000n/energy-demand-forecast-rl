@@ -1,189 +1,235 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+import json
+from pathlib import Path
+from typing import Dict, List, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from src.energy_env import ApplianceRequest, EnergySchedulingEnv
-from src.utils.common import ensure_dirs, project_root, save_json, set_seed
+from src.energy_env import EnergySchedulingEnv
 
 
-@dataclass
-class RLConfig:
-    episodes: int = 40
-    alpha: float = 0.1
-    gamma: float = 0.95
-    epsilon: float = 0.2
-    seeds: tuple[int, int, int] = (7, 21, 42)
+ROOT = Path(__file__).resolve().parents[1]
+RESULTS_DIR = ROOT / "results"
+LOGS_DIR = ROOT / "logs"
 
 
-class QLearningAgent:
-    def __init__(self, num_actions: int = 2):
-        self.num_actions = num_actions
-        self.q_table = np.zeros((4, 8, 2, num_actions), dtype=np.float32)
-
-    def act(self, state: tuple[int, int, int], epsilon: float) -> int:
-        if np.random.rand() < epsilon:
-            return np.random.randint(self.num_actions)
-        return int(np.argmax(self.q_table[state]))
-
-    def update(
-        self,
-        state: tuple[int, int, int],
-        action: int,
-        reward: float,
-        next_state: tuple[int, int, int],
-        alpha: float,
-        gamma: float,
-    ) -> None:
-        old_q = self.q_table[state][action]
-        best_next = np.max(self.q_table[next_state])
-        self.q_table[state][action] = old_q + alpha * (reward + gamma * best_next - old_q)
+def ensure_dirs() -> None:
+    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    LOGS_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def _prepare_forecast_df(processed_csv_path, forecast_csv_path):
-    actual = pd.read_csv(processed_csv_path)
-    preds = pd.read_csv(forecast_csv_path)
+def load_forecast_predictions() -> pd.DataFrame:
+    path = RESULTS_DIR / "forecast_predictions.csv"
+    if not path.exists():
+        raise FileNotFoundError(
+            "results/forecast_predictions.csv not found. Run forecasting first."
+        )
 
-    actual["datetime"] = pd.to_datetime(actual["datetime"], errors="coerce")
-    preds["datetime"] = pd.to_datetime(preds["datetime"], errors="coerce")
+    df = pd.read_csv(path)
 
-    actual = actual.dropna(subset=["datetime"])
-    preds = preds.dropna(subset=["datetime"])
-
-    merged = preds.merge(
-        actual[["datetime", "hour", "dayofweek", "is_weekend"]],
-        on="datetime",
-        how="left"
-    )
-
-    merged["predicted_demand_kw"] = merged["lstm_pred"]
-    merged["actual_demand_kw"] = merged["actual"]
-
-    return merged[
-        ["datetime", "hour", "dayofweek", "is_weekend", "predicted_demand_kw", "actual_demand_kw"]
+    expected_candidates = [
+        ("datetime", "actual", "lstm_pred"),
+        ("datetime", "actual", "tcn_pred"),
+        ("datetime", "actual", "baseline_pred"),
     ]
 
+    valid = False
+    for cols in expected_candidates:
+        if all(c in df.columns for c in cols):
+            valid = True
+            break
 
-def _run_single_seed(forecast_df: pd.DataFrame, seed: int, cfg: RLConfig):
-    set_seed(seed)
+    if not valid:
+        raise ValueError(
+            "forecast_predictions.csv must contain at least datetime, actual, and one prediction column."
+        )
 
-    appliance_templates = [
-        ApplianceRequest("dishwasher", power_kw=1.0, duration_hours=1, earliest_start_hour=19, latest_finish_hour=23),
-        ApplianceRequest("washing_machine", power_kw=1.2, duration_hours=1, earliest_start_hour=18, latest_finish_hour=22),
-        ApplianceRequest("water_heater", power_kw=0.8, duration_hours=1, earliest_start_hour=6, latest_finish_hour=9),
-    ]
+    df["datetime"] = pd.to_datetime(df["datetime"], errors="coerce")
+    df = df.dropna(subset=["datetime"]).reset_index(drop=True)
+    return df
 
-    env = EnergySchedulingEnv(forecast_df, appliance_templates)
-    agent = QLearningAgent()
 
-    episode_rewards = []
-    success_rates = []
+def discretize_state(state: np.ndarray) -> Tuple[int, int, int, int]:
+    demand_bin = int(state[0])
+    hour_bin = min(int(state[1] * 4), 3)
+    appliance_id = int(state[2])
+    delay_bin = min(int(state[3] * 3), 2)
+    return demand_bin, hour_bin, appliance_id, delay_bin
 
-    # Training loop
-    for _ in range(cfg.episodes):
+
+def choose_action(
+    q_table: np.ndarray,
+    state_key: Tuple[int, int, int, int],
+    epsilon: float,
+    rng: np.random.Generator,
+) -> int:
+    if rng.random() < epsilon:
+        return int(rng.integers(0, 2))
+    return int(np.argmax(q_table[state_key]))
+
+
+def train_q_learning(
+    env_df: pd.DataFrame,
+    prediction_col: str = "lstm_pred",
+    episodes: int = 30,
+    alpha: float = 0.10,
+    gamma: float = 0.95,
+    epsilon_start: float = 1.00,
+    epsilon_end: float = 0.10,
+    seed: int = 42,
+) -> Dict:
+    rng = np.random.default_rng(seed)
+
+    q_table = np.zeros((3, 4, 4, 3, 2), dtype=np.float32)
+    rewards_per_episode: List[float] = []
+
+    for episode in range(episodes):
+        epsilon = epsilon_start - (epsilon_start - epsilon_end) * (episode / max(episodes - 1, 1))
+        env = EnergySchedulingEnv(
+            df=env_df,
+            predicted_demand_col=prediction_col,
+            actual_demand_col="actual",
+            seed=seed + episode,
+        )
+
         state = env.reset()
         done = False
-        total_reward = 0.0
+        episode_reward = 0.0
 
         while not done:
-            action = agent.act(state, cfg.epsilon)
+            state_key = discretize_state(state)
+            action = choose_action(q_table, state_key, epsilon, rng)
+
             next_state, reward, done, _ = env.step(action)
-            agent.update(state, action, reward, next_state, cfg.alpha, cfg.gamma)
+            next_key = discretize_state(next_state)
+
+            best_next = np.max(q_table[next_key])
+            old_value = q_table[state_key][action]
+            new_value = old_value + alpha * (reward + gamma * best_next - old_value)
+            q_table[state_key][action] = new_value
+
             state = next_state
-            total_reward += reward
+            episode_reward += reward
 
-        episode_rewards.append(total_reward)
-        denom = max(env.successes + env.failures, 1)
-        success_rates.append(env.successes / denom)
+        rewards_per_episode.append(episode_reward)
 
-    # Deterministic evaluation
-    env_eval = EnergySchedulingEnv(forecast_df, appliance_templates)
-    state = env_eval.reset()
+    eval_env = EnergySchedulingEnv(
+        df=env_df,
+        predicted_demand_col=prediction_col,
+        actual_demand_col="actual",
+        seed=seed + 999,
+    )
+
+    state = eval_env.reset()
     done = False
-    total_reward = 0.0
-    decisions = []
 
     while not done:
-        action = int(np.argmax(agent.q_table[state]))
-        next_state, reward, done, info = env_eval.step(action)
-        total_reward += reward
-        decisions.append(info)
+        state_key = discretize_state(state)
+        action = int(np.argmax(q_table[state_key]))
+        next_state, _, done, info = eval_env.step(action)
         state = next_state
 
-    decisions_df = pd.DataFrame(decisions)
-    baseline_cost = float(decisions_df["baseline_cost"].sum())
-    scheduled_cost = float(decisions_df["scheduled_cost"].sum())
-    rl_success_rate = float(env_eval.successes / max(env_eval.successes + env_eval.failures, 1))
+    decisions_df = pd.DataFrame(eval_env.decision_rows)
 
-    return {
+    result = {
         "seed": seed,
-        "episode_rewards": episode_rewards,
-        "episode_success_rates": success_rates,
-        "final_reward": float(total_reward),
-        "baseline_cost": baseline_cost,
-        "scheduled_cost": scheduled_cost,
-        "success_rate": rl_success_rate,
+        "prediction_col": prediction_col,
+        "episode_rewards": rewards_per_episode,
+        "final_reward": float(rewards_per_episode[-1] if rewards_per_episode else 0.0),
+        "mean_reward": float(np.mean(rewards_per_episode) if rewards_per_episode else 0.0),
+        "baseline_cost": float(info.get("total_baseline_cost", 0.0)),
+        "scheduled_cost": float(info.get("total_scheduled_cost", 0.0)),
+        "cost_reduction": float(
+            info.get("total_baseline_cost", 0.0) - info.get("total_scheduled_cost", 0.0)
+        ),
+        "success_rate": float(info.get("success_rate", 1.0)),
         "decisions_df": decisions_df,
+        "q_table": q_table,
     }
+    return result
 
 
-def run_rl_experiment(processed_csv_path: str, forecast_csv_path: str) -> dict[str, float]:
-    ensure_dirs()
-    root = project_root()
-    results_dir = root / "results"
-    logs_dir = root / "logs"
-    cfg = RLConfig()
-
-    forecast_df = _prepare_forecast_df(processed_csv_path, forecast_csv_path)
-    runs = [_run_single_seed(forecast_df, seed, cfg) for seed in cfg.seeds]
-
-    plt.figure(figsize=(8, 4))
-    for run in runs:
-        plt.plot(run["episode_rewards"], label=f"seed {run['seed']}")
-    plt.title("RL Learning Curves")
+def save_learning_curve(all_runs: List[Dict]) -> None:
+    plt.figure(figsize=(10, 5))
+    for run in all_runs:
+        rewards = run["episode_rewards"]
+        plt.plot(range(1, len(rewards) + 1), rewards, label=f"seed={run['seed']}")
     plt.xlabel("Episode")
-    plt.ylabel("Reward")
+    plt.ylabel("Total reward")
+    plt.title("RL Learning Curves")
     plt.legend()
     plt.tight_layout()
-    plt.savefig(results_dir / "rl_learning_curves.png")
+    plt.savefig(RESULTS_DIR / "rl_learning_curves.png")
     plt.close()
 
+
+def save_metrics(all_runs: List[Dict]) -> None:
+    rows = []
+    for run in all_runs:
+        rows.append(
+            {
+                "seed": run["seed"],
+                "prediction_col": run["prediction_col"],
+                "final_reward": run["final_reward"],
+                "mean_reward": run["mean_reward"],
+                "baseline_cost": run["baseline_cost"],
+                "scheduled_cost": run["scheduled_cost"],
+                "cost_reduction": run["cost_reduction"],
+                "success_rate": run["success_rate"],
+            }
+        )
+
+    metrics_df = pd.DataFrame(rows)
+    metrics_df.to_csv(RESULTS_DIR / "rl_metrics_by_seed.csv", index=False)
+
     summary = {
-        "mean_final_reward": float(np.mean([r["final_reward"] for r in runs])),
-        "reward_std": float(np.std([r["final_reward"] for r in runs])),
-        "mean_success_rate": float(np.mean([r["success_rate"] for r in runs])),
-        "mean_baseline_cost": float(np.mean([r["baseline_cost"] for r in runs])),
-        "mean_scheduled_cost": float(np.mean([r["scheduled_cost"] for r in runs])),
-        "mean_cost_reduction": float(np.mean([r["baseline_cost"] - r["scheduled_cost"] for r in runs])),
+        "mean_final_reward": float(metrics_df["final_reward"].mean()),
+        "reward_std": float(metrics_df["final_reward"].std(ddof=0)),
+        "mean_success_rate": float(metrics_df["success_rate"].mean()),
+        "mean_baseline_cost": float(metrics_df["baseline_cost"].mean()),
+        "mean_scheduled_cost": float(metrics_df["scheduled_cost"].mean()),
+        "mean_cost_reduction": float(metrics_df["cost_reduction"].mean()),
     }
 
-    pd.DataFrame([
-        {
-            "seed": run["seed"],
-            "final_reward": run["final_reward"],
-            "success_rate": run["success_rate"],
-            "baseline_cost": run["baseline_cost"],
-            "scheduled_cost": run["scheduled_cost"],
-            "cost_reduction": run["baseline_cost"] - run["scheduled_cost"],
-        }
-        for run in runs
-    ]).to_csv(results_dir / "rl_metrics_by_seed.csv", index=False)
+    with open(LOGS_DIR / "rl_summary.json", "w", encoding="utf-8") as f:
+        json.dump(summary, f, indent=2)
 
-    best_run = max(runs, key=lambda x: x["final_reward"])
-    best_run["decisions_df"].to_csv(results_dir / "rl_decisions_sample.csv", index=False)
-    save_json(logs_dir / "rl_summary.json", summary)
 
-    return summary
+def main() -> None:
+    ensure_dirs()
+    df = load_forecast_predictions()
+
+    seeds = [42, 52, 62]
+    all_runs: List[Dict] = []
+
+    for seed in seeds:
+        run = train_q_learning(
+            env_df=df,
+            prediction_col="lstm_pred" if "lstm_pred" in df.columns else "actual",
+            episodes=30,
+            alpha=0.10,
+            gamma=0.95,
+            epsilon_start=1.00,
+            epsilon_end=0.10,
+            seed=seed,
+        )
+        all_runs.append(run)
+
+    save_learning_curve(all_runs)
+    save_metrics(all_runs)
+
+    best_run = max(all_runs, key=lambda x: x["cost_reduction"])
+    best_run["decisions_df"].to_csv(RESULTS_DIR / "rl_decisions_sample.csv", index=False)
+
+    print("RL scheduling complete.")
+    print(f"Saved: {RESULTS_DIR / 'rl_learning_curves.png'}")
+    print(f"Saved: {RESULTS_DIR / 'rl_metrics_by_seed.csv'}")
+    print(f"Saved: {RESULTS_DIR / 'rl_decisions_sample.csv'}")
+    print(f"Saved: {LOGS_DIR / 'rl_summary.json'}")
 
 
 if __name__ == "__main__":
-    root = project_root()
-    print(
-        run_rl_experiment(
-            str(root / "data" / "processed_energy_hourly.csv"),
-            str(root / "results" / "forecast_predictions.csv"),
-        )
-    )
+    main()
