@@ -1,0 +1,14 @@
+{
+  "device": "cpu",
+  "seed": 42,
+  "window_size": 24,
+  "batch_size": 64,
+  "max_epochs": 20,
+  "patience": 4,
+  "learning_rate": 0.001,
+  "runtime_minutes": 2.8979448278745017,
+  "early_stopping_enabled": true,
+  "lstm_best_val_loss": 0.33944819040778207,
+  "tcn_best_val_loss": 0.33929669875197294,
+  "lstm_no_time_best_val_loss": 0.35593264359163074
+}

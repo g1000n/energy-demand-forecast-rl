@@ -7,8 +7,9 @@ import matplotlib.pyplot as plt
 
 
 ROOT = Path(__file__).resolve().parent
-RESULTS = ROOT / "results"
-LOGS = ROOT / "logs"
+EXPERIMENTS = ROOT / "experiments"
+RESULTS = EXPERIMENTS / "results"
+LOGS = EXPERIMENTS / "logs"
 
 
 st.set_page_config(page_title="Energy Demand Forecasting + RL Dashboard", layout="wide")

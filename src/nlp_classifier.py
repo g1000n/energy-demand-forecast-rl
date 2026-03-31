@@ -17,12 +17,12 @@ def project_root() -> Path:
 
 
 def ensure_dirs(root: Path) -> tuple[Path, Path]:
-    results_dir = root / "results"
-    logs_dir = root / "logs"
+    experiments_dir = root / "experiments"
+    results_dir = experiments_dir / "results"
+    logs_dir = experiments_dir / "logs"
     results_dir.mkdir(parents=True, exist_ok=True)
     logs_dir.mkdir(parents=True, exist_ok=True)
     return results_dir, logs_dir
-
 
 def build_text_features(df: pd.DataFrame) -> pd.DataFrame:
     data = df.copy()

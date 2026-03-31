@@ -1,0 +1,6 @@
+{
+  "num_models_evaluated": 3,
+  "num_ablation_rows": 3,
+  "num_slice_rows": 18,
+  "worst_case_count": 20
+}

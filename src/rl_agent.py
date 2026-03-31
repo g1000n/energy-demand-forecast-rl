@@ -12,8 +12,9 @@ from src.energy_env import EnergySchedulingEnv
 
 
 ROOT = Path(__file__).resolve().parents[1]
-RESULTS_DIR = ROOT / "results"
-LOGS_DIR = ROOT / "logs"
+EXPERIMENTS_DIR = ROOT / "experiments"
+RESULTS_DIR = EXPERIMENTS_DIR / "results"
+LOGS_DIR = EXPERIMENTS_DIR / "logs"
 
 
 def ensure_dirs() -> None:

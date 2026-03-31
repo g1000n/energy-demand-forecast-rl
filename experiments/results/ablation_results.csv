@@ -1,0 +1,4 @@
+experiment,prediction_column,mae,mape,notes
+Linear Regression Baseline,baseline_pred,0.37901075875595247,0.5876135922829883,Non-DL baseline with lag/time features
+LSTM,lstm_pred,0.3147894773731919,0.4107690889989996,Core deep learning forecaster
+TCN,tcn_pred,0.3222482699942141,0.45194046163807744,CNN-based time-series forecaster

@@ -1,0 +1,8 @@
+{
+  "mean_final_reward": 1372.666666666629,
+  "reward_std": 18.55156477377425,
+  "mean_success_rate": 0.9995505466255271,
+  "mean_baseline_cost": 7180.145217723351,
+  "mean_scheduled_cost": 6154.1452177233505,
+  "mean_cost_reduction": 1026.0000000000002
+}
