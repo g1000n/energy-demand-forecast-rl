@@ -229,3 +229,16 @@ The project includes:
 * The RL environment simulates flexible appliance scheduling due to dataset limitations.
 * This system is designed for **educational and experimental purposes only**.
 
+
+## Dataset License and Citation
+
+This project uses the **Individual Household Electric Power Consumption** dataset from the UCI Machine Learning Repository.
+
+**Citation:**
+Hebrail, G., & Berard, A. (2006). *Individual Household Electric Power Consumption* [Dataset].  
+UCI Machine Learning Repository. https://doi.org/10.24432/C58K54  
+
+**License:**
+This dataset is licensed under the **Creative Commons Attribution 4.0 International (CC BY 4.0)** license.
+
+We acknowledge and credit the original authors and the UCI Machine Learning Repository.
