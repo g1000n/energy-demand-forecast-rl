@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -e
 
+python -m data.get_data
 python -m src.data_pipeline
 python -m src.train
 python -m src.eval

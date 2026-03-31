@@ -31,7 +31,7 @@ cd energy-demand-forecast-rl
 
 ---
 
-### 2. Create and Activate a Virtual Environment
+### 2. (Optional but Recommended) Create a Virtual Environment
 
 #### Windows (PowerShell)
 
@@ -64,10 +64,14 @@ pip install -r requirements.txt
 
 ---
 
-### 4. Prepare the Dataset
+### 4. The Dataset
 
-Download the **UCI Individual Household Electric Power Consumption Dataset** and place the file here:
+The dataset source is the **UCI Individual Household Electric Power Consumption Dataset**:
 - Source: https://archive.ics.uci.edu/dataset/235/individual+household+electric+power+consumption
+
+The raw file will be automatically retrieved by the helper script during pipeline execution if it is not already present.
+
+Expected local path:
 ```
 data/household_power_consumption.txt
 ```
@@ -99,8 +103,8 @@ This will execute:
 Outputs will be saved in:
 
 ```
-results/
-logs/
+experiments/results/
+experiments/logs/
 ```
 
 ---

@@ -20,6 +20,7 @@ def run_step(name, module_name):
         sys.exit(result.returncode)
 
 def main():
+    run_step("Get Data", "data.get_data") 
     run_step("Data Pipeline", "src.data_pipeline")
     run_step("Training", "src.train")
     run_step("Evaluation", "src.eval")
